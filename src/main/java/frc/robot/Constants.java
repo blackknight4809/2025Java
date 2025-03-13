@@ -36,5 +36,6 @@ public final class Constants {
 
   public static class algeaRemover {
     public static final int poker = 10;
+    public static final int actuator = 0; // PWM channel for the linear actuator servo
   }
 }

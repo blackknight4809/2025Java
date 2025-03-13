@@ -7,6 +7,10 @@ package frc.robot;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import com.studica.frc.AHRS;
+import edu.wpi.first.wpilibj.SPI;
+import com.studica.frc.AHRS.NavXComType;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 /**
  * The methods in this class are called automatically corresponding to each mode, as described in
@@ -14,10 +18,21 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
  * this project, you must also update the Main.java file in the project.
  */
 public class Robot extends TimedRobot {
+  private AHRS navX;
+
+
+
+
   private Command m_autonomousCommand;
 
   private final RobotContainer m_robotContainer;
-
+  
+  @Override
+  public void robotInit() {
+      navX = new AHRS(AHRS.NavXComType.kMXP_SPI);
+      navX.reset();
+  }
+  
   /**
    * This function is run when the robot is first started up and should be used for any
    * initialization code.
@@ -42,6 +57,12 @@ public class Robot extends TimedRobot {
     // and running subsystem periodic() methods.  This must be called from the robot's periodic
     // block in order for anything in the Command-based framework to work.
     CommandScheduler.getInstance().run();
+
+  
+      SmartDashboard.putNumber("NavX Yaw", navX.getYaw());
+      SmartDashboard.putNumber("NavX Angle", navX.getAngle());
+  
+
   }
 
   /** This function is called once each time the robot enters Disabled mode. */

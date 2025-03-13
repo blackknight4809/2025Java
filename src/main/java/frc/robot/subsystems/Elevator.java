@@ -10,9 +10,11 @@ import com.revrobotics.spark.SparkBase.PersistMode;
 import com.revrobotics.spark.SparkBase.ResetMode;
 import com.revrobotics.RelativeEncoder;
 import edu.wpi.first.wpilibj.Joystick;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 public class Elevator extends SubsystemBase {
     // Leader and follower using the new REVLib 2025 SparkMax.
@@ -89,4 +91,9 @@ public class Elevator extends SubsystemBase {
     public void manualControl(double speed) {
         leader.set(speed);
     }
+@Override
+public void periodic() {
+    SmartDashboard.putNumber("Elevator Encoder", leader.getEncoder().getPosition());
+    
+}
 }
