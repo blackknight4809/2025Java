@@ -26,8 +26,8 @@ public class RobotContainer {
     // Elevator and Dispenser use the operator joystick (port 1).
     elevator = new Elevator();
     dispenser = new Dispenser(operatorJoystick);
-    // AlgeaRemover is instantiated without a joystick parameter.
-    algeaRemover = new AlgeaRemover();
+    // AlgeaRemover now uses the Xbox controller (port 0) so it can read the right Y axis.
+    algeaRemover = new AlgeaRemover(driveController);
     
     // Configure all button bindings.
     configureBindings();
@@ -66,8 +66,8 @@ public class RobotContainer {
     shooterBackwardButton.onTrue(new InstantCommand(() -> dispenser.setShooterSpeed(-0.5), dispenser));
     
     // --- AlgeaRemover Preset Bindings ---
-    // Bind buttons on the Xbox controller (port 0) for AlgeaRemover commands.
-    // Button 3 runs the first preset command and button 4 runs the second.
+    // Bind buttons on the Xbox controller (port 0) for AlgeaRemover preset commands.
+    // Button 3 runs the low preset and button 4 runs the high preset.
     JoystickButton algeaRemoverPreset1Button = new JoystickButton(driveController, 3);
     JoystickButton algeaRemoverPreset2Button = new JoystickButton(driveController, 4);
     

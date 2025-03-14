@@ -61,6 +61,9 @@ public class Robot extends TimedRobot {
   
       SmartDashboard.putNumber("NavX Yaw", navX.getYaw());
       SmartDashboard.putNumber("NavX Angle", navX.getAngle());
+
+
+      
   
 
   }

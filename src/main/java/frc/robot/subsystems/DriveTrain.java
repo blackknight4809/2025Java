@@ -81,7 +81,7 @@ public class DriveTrain extends SubsystemBase {
     setDefaultCommand(
       new RunCommand(() -> {
         double forward = -controller.getLeftY();  // Invert if necessary so forward is positive.
-        double rotation = controller.getRightX();
+        double rotation = controller.getLeftX();
         drive.arcadeDrive(forwardLimiter.calculate(forward),
                           rotationLimiter.calculate(rotation));
       }, this)

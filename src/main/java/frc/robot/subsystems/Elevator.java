@@ -94,6 +94,7 @@ public class Elevator extends SubsystemBase {
 @Override
 public void periodic() {
     SmartDashboard.putNumber("Elevator Encoder", leader.getEncoder().getPosition());
+    SmartDashboard.putNumber("elevator motor output", leader.getAppliedOutput());
     
 }
 }
