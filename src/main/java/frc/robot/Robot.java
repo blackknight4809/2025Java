@@ -8,118 +8,92 @@ import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import com.studica.frc.AHRS;
+import edu.wpi.first.cameraserver.CameraServer;
+import edu.wpi.first.cscore.UsbCamera;
+import edu.wpi.first.cscore.VideoMode;
 import edu.wpi.first.wpilibj.SPI;
-import com.studica.frc.AHRS.NavXComType;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
-/**
- * The methods in this class are called automatically corresponding to each mode, as described in
- * the TimedRobot documentation. If you change the name of this class or the package after creating
- * this project, you must also update the Main.java file in the project.
- */
 public class Robot extends TimedRobot {
   private AHRS navX;
-
-
-
-
   private Command m_autonomousCommand;
-
   private final RobotContainer m_robotContainer;
+  
+  public Robot() {
+    // Instantiate RobotContainer. This sets up subsystems and button bindings.
+    m_robotContainer = new RobotContainer();
+  }
   
   @Override
   public void robotInit() {
-      navX = new AHRS(AHRS.NavXComType.kMXP_SPI);
-      navX.reset();
+    // Initialize navX on the MXP port.
+    navX = new AHRS(AHRS.NavXComType.kMXP_SPI);
+    navX.reset();
+    
+    // Start capturing video from the USB camera in a try-catch.
+    try {
+      UsbCamera camera = CameraServer.startAutomaticCapture("USB Camera", 0);
+      // Use a low resolution and modest FPS to reduce bandwidth demands.
+      //camera.setResolution(160, 240);
+      //camera.setFPS(15);
+      // No fancy brightness or pixel format settings—keep it basic.
+    } catch (Exception e) {
+      System.err.println("Camera initialization error: " + e.getMessage());
+    }
   }
   
-  /**
-   * This function is run when the robot is first started up and should be used for any
-   * initialization code.
-   */
-  public Robot() {
-    // Instantiate our RobotContainer.  This will perform all our button bindings, and put our
-    // autonomous chooser on the dashboard.
-    m_robotContainer = new RobotContainer();
-  }
-
-  /**
-   * This function is called every 20 ms, no matter the mode. Use this for items like diagnostics
-   * that you want ran during disabled, autonomous, teleoperated and test.
-   *
-   * <p>This runs after the mode specific periodic functions, but before LiveWindow and
-   * SmartDashboard integrated updating.
-   */
   @Override
   public void robotPeriodic() {
-    // Runs the Scheduler.  This is responsible for polling buttons, adding newly-scheduled
-    // commands, running already-scheduled commands, removing finished or interrupted commands,
-    // and running subsystem periodic() methods.  This must be called from the robot's periodic
-    // block in order for anything in the Command-based framework to work.
+    // Run the command scheduler.
     CommandScheduler.getInstance().run();
-
-  
-      SmartDashboard.putNumber("NavX Yaw", navX.getYaw());
-      SmartDashboard.putNumber("NavX Angle", navX.getAngle());
-
-
-      
-  
-
+    
+    // Update SmartDashboard with navX data.
+    SmartDashboard.putNumber("NavX Yaw", navX.getYaw());
+    SmartDashboard.putNumber("NavX Angle", navX.getAngle());
+    
+    // Log operator joystick button states.
+ //   for (int i = 1; i <= 12; i++) {
+ //     SmartDashboard.putBoolean("Joystick(1) Button " + i, m_robotContainer.getOperatorJoystick().getRawButton(i));
+ //   }
   }
-
-  /** This function is called once each time the robot enters Disabled mode. */
+  
   @Override
   public void disabledInit() {}
-
   @Override
   public void disabledPeriodic() {}
-
-  /** This autonomous runs the autonomous command selected by your {@link RobotContainer} class. */
+  
   @Override
   public void autonomousInit() {
     m_autonomousCommand = m_robotContainer.getAutonomousCommand();
-
-    // schedule the autonomous command (example)
     if (m_autonomousCommand != null) {
       m_autonomousCommand.schedule();
     }
   }
-
-  /** This function is called periodically during autonomous. */
+  
   @Override
   public void autonomousPeriodic() {}
-
+  
   @Override
   public void teleopInit() {
-    // This makes sure that the autonomous stops running when
-    // teleop starts running. If you want the autonomous to
-    // continue until interrupted by another command, remove
-    // this line or comment it out.
     if (m_autonomousCommand != null) {
       m_autonomousCommand.cancel();
     }
   }
-
-  /** This function is called periodically during operator control. */
+  
   @Override
   public void teleopPeriodic() {}
-
+  
   @Override
   public void testInit() {
-    // Cancels all running commands at the start of test mode.
     CommandScheduler.getInstance().cancelAll();
   }
-
-  /** This function is called periodically during test mode. */
+  
   @Override
   public void testPeriodic() {}
-
-  /** This function is called once when the robot is first started up. */
+  
   @Override
   public void simulationInit() {}
-
-  /** This function is called periodically whilst in simulation. */
+  
   @Override
   public void simulationPeriodic() {}
 }

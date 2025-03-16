@@ -6,9 +6,11 @@ import edu.wpi.first.wpilibj.Encoder;
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.wpilibj2.command.RunCommand;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.math.MathUtil;
 
 public class Dispenser extends SubsystemBase {
   // Carriage motor (brushed) controlled by SparkMax.
@@ -27,52 +29,82 @@ public class Dispenser extends SubsystemBase {
   // Joystick for carriage control (generic gamepad on controller port 1).
   private final Joystick dispenserJoystick;
 
-  // Preset positions for carriage (encoder units; adjust these values).
-  private static final double PRESET_RIGHT  = 0.0;
-  private static final double PRESET_CENTER = 500.0;
-  private static final double PRESET_LEFT   = 1000.0;
+  // Preset positions for carriage (encoder units).
+  // Far Left = 0, Center = 1138, Far Right = 2236.
+  private static final double PRESET_LEFT   = 0.0;
+  private static final double PRESET_CENTER = 1138.0;
+  private static final double PRESET_RIGHT  = 2236.0;
+
+  // Deadband for manual control.
+  private static final double DEADBAND = 0.15;
+  
+  // Define encoder limits.
+  private static final double MIN_ENCODER_LIMIT = 0.0;
+  private static final double MAX_ENCODER_LIMIT = 2236.0;
 
   public Dispenser(Joystick joystick) {
-    // Instantiate the carriage motor using its CAN ID from Constants and set it as a brushed motor.
+    // Instantiate the carriage motor using its CAN ID from Constants.
     carriageMotor = new SparkMax(Constants.Dispenser.carriage, MotorType.kBrushed);
-    // Instantiate the shooter motor using its CAN ID.
+    // Instantiate the shooter motor.
     shooterMotor  = new SparkMax(Constants.Dispenser.shooter, MotorType.kBrushed);
 
-    // Restore factory defaults for consistent behavior.
-    //carriageMotor.restoreFactoryDefaults();
-    //shooterMotor.restoreFactoryDefaults();
-
     // Instantiate the external encoder.
-    // (Assuming the encoder is connected to DIO channels 0 and 1; change as needed.)
     carriageEncoder = new Encoder(0, 1);
-    // Set the distance per pulse (adjust according to your encoder specifications).
     carriageEncoder.setDistancePerPulse(1.0);
 
     // Instantiate a PIDController for carriage closed-loop control.
-    // Example gains; tune these for your mechanism.
     carriagePID = new PIDController(0.1, 0.0, 0.0);
     carriagePID.setTolerance(5.0);
 
     // Instantiate the generic gamepad (Joystick) on port 1.
     dispenserJoystick = joystick;
+    
+    // Add a SmartDashboard widget to allow manual resetting of the carriage encoder.
+    SmartDashboard.putData("Reset Carriage Encoder", 
+        new InstantCommand(() -> carriageEncoder.reset(), this));
+
+    // Set the default command to handle manual carriage control with preset override.
+    setDefaultCommand(new RunCommand(() -> {
+      // Get the raw manual input from the joystick's X axis.
+      double manualInput = dispenserJoystick.getX();
+      
+      // Cancel preset mode if any significant manual input is detected.
+      if (Math.abs(manualInput) > 0.05) {
+          presetMode = false;
+      }
+      
+      // Apply deadband.
+      if (Math.abs(manualInput) < DEADBAND) {
+          manualInput = 0.0;
+      }
+      
+      // Limit maximum speed to 0.5.
+      double maxSpeed = 0.5;
+      manualInput = MathUtil.clamp(manualInput, -maxSpeed, maxSpeed);
+      
+      // Enforce encoder limits on manual input.
+      double currentEncoder = carriageEncoder.getDistance();
+      if (currentEncoder >= MAX_ENCODER_LIMIT && manualInput > 0) {
+           manualInput = 0.0;
+      }
+      if (currentEncoder <= MIN_ENCODER_LIMIT && manualInput < 0) {
+           manualInput = 0.0;
+      }
+      
+      if (Math.abs(manualInput) > 0.0) {
+          carriageMotor.set(manualInput);
+      } else if (presetMode) {
+          double output = carriagePID.calculate(currentEncoder, carriageTarget);
+          carriageMotor.set(output);
+      } else {
+          carriageMotor.set(0.0);
+      }
+    }, this));
   }
 
   @Override
   public void periodic() {
-    // Read manual input from the joystick's X axis.
-    double manualInput = dispenserJoystick.getX();
-
-    // If manual input is significant, override preset mode.
-    if (Math.abs(manualInput) > 0.1) {
-      presetMode = false;
-      carriageMotor.set(manualInput);
-    } else if (presetMode) {
-      // In preset mode, use the PID controller to drive the carriage to the target.
-      double currentPosition = carriageEncoder.getDistance();
-      double output = carriagePID.calculate(currentPosition, carriageTarget);
-      carriageMotor.set(output);
-    }
-    // Otherwise, if no manual input and not in preset mode, do nothing (or hold current state).
+    // Update the SmartDashboard with the current carriage encoder value.
     SmartDashboard.putNumber("Carriage Encoder", carriageEncoder.getDistance());
   }
 
@@ -82,21 +114,24 @@ public class Dispenser extends SubsystemBase {
    * @param target The target encoder position.
    */
   public void goToCarriagePosition(double target) {
-    carriageTarget = target;
+    // Clamp the target to within the safe range.
+    carriageTarget = MathUtil.clamp(target, MIN_ENCODER_LIMIT, MAX_ENCODER_LIMIT);
     presetMode = true;
+    carriagePID.reset();
+    carriageMotor.set(carriagePID.calculate(carriageEncoder.getDistance(), carriageTarget));
   }
 
   // Convenience methods for preset carriage positions.
-  public void goToRight() {
-    goToCarriagePosition(PRESET_RIGHT);
+  public void goToLeft() {
+    goToCarriagePosition(PRESET_LEFT);
   }
 
   public void goToCenter() {
     goToCarriagePosition(PRESET_CENTER);
   }
 
-  public void goToLeft() {
-    goToCarriagePosition(PRESET_LEFT);
+  public void goToRight() {
+    goToCarriagePosition(PRESET_RIGHT);
   }
 
   /**
@@ -107,6 +142,4 @@ public class Dispenser extends SubsystemBase {
   public void setShooterSpeed(double speed) {
     shooterMotor.set(speed);
   }
-
-  
 }
