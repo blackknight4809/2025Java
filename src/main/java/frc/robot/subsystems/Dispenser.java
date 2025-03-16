@@ -84,10 +84,10 @@ public class Dispenser extends SubsystemBase {
       
       // Enforce encoder limits on manual input.
       double currentEncoder = carriageEncoder.getDistance();
-      if (currentEncoder >= MAX_ENCODER_LIMIT && manualInput > 0) {
+      if (currentEncoder >= MAX_ENCODER_LIMIT && manualInput < 0) {
            manualInput = 0.0;
       }
-      if (currentEncoder <= MIN_ENCODER_LIMIT && manualInput < 0) {
+      if (currentEncoder <= MIN_ENCODER_LIMIT && manualInput > 0) {
            manualInput = 0.0;
       }
       
@@ -136,10 +136,15 @@ public class Dispenser extends SubsystemBase {
 
   /**
    * Sets the shooter motor speed.
+   * If the input speed is 0, the motor stops; otherwise, it runs at full speed (1.0).
    *
-   * @param speed Motor output (e.g., 0.5 for forward, -0.5 for reverse).
+   * @param speed Motor output value (ignored if nonzero, set to 1.0; 0 stops the motor).
    */
   public void setShooterSpeed(double speed) {
-    shooterMotor.set(speed);
+    if (speed == 0.0) {
+      shooterMotor.set(0.0);
+    } else {
+      shooterMotor.set(1.0);
+    }
   }
 }

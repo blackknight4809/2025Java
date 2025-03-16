@@ -11,6 +11,7 @@ import com.revrobotics.spark.SparkBase.ResetMode;
 import com.revrobotics.RelativeEncoder;
 
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.InstantCommand;
@@ -30,6 +31,9 @@ public class Elevator extends SubsystemBase {
     // Joystick (port 1) used for manual control.
     private final Joystick joystick;
     
+    // Slew rate limiter for smoothing manual input.
+    private final SlewRateLimiter slewLimiter;
+    
     // Preset positions (encoder units). Negative values: 0 is bottom, -14 is top.
     private static final double POSITION_BOTTOM = 0.0;
     private static final double POSITION_LOW    = -2.0;
@@ -43,6 +47,9 @@ public class Elevator extends SubsystemBase {
     private boolean presetActive = false;
     private double targetPosition = 0.0;
     
+    // Hold target: when no manual input, we'll hold this position.
+    private double holdTarget = Double.NaN;
+    
     /**
      * Constructs the Elevator subsystem.
      * @param joystick The Joystick on port 1 used for manual control.
@@ -50,16 +57,12 @@ public class Elevator extends SubsystemBase {
     public Elevator(Joystick joystick) {
         this.joystick = joystick;
         
+        // Instantiate slew rate limiter (adjust rate as needed).
+        slewLimiter = new SlewRateLimiter(0.5);
+        
         // Instantiate leader and follower using CAN IDs from Constants.
         leader = new SparkMax(Constants.Elevator.liftLeft, MotorType.kBrushless);
         follower = new SparkMax(Constants.Elevator.liftRight, MotorType.kBrushless);
-        
-        // -- Configuration code using SparkMaxConfig is commented out --
-        /*
-        SparkMaxConfig leaderConfig = new SparkMaxConfig();
-        leaderConfig.inverted(false);  // Set leader inversion via config.
-        leader.configure(leaderConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        */
         
         // Manually set leader inversion.
         leader.setInverted(false);
@@ -68,36 +71,47 @@ public class Elevator extends SubsystemBase {
         closedLoopController = leader.getClosedLoopController();
         encoder = leader.getEncoder();
         
-        // -- Configuration code for follower is commented out --
-        /*
-        SparkMaxConfig followerConfig = new SparkMaxConfig();
-        followerConfig.inverted(true).follow(leader);
-        follower.configure(followerConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        */
-        
-        // Manually set follower inversion and command it to follow the leader.
+        // Manually set follower inversion.
         follower.setInverted(true);
-       // follower.follow(leader);
+        // Optionally: follower.follow(leader);
         
-        // Set the default command: use the joystick's Y axis for manual control,
-        // with deadband, speed limiting, and preset override.
+        // Set the default command:
+        // If manual input exists, override preset and update holdTarget.
+        // If no manual input and no preset, hold the last known position.
+        // If preset is active, command the target.
         setDefaultCommand(new RunCommand(() -> {
             double manualInput = joystick.getY();
-            // Apply deadband:
+            // Apply deadband.
             if (Math.abs(manualInput) < DEADBAND) {
                 manualInput = 0.0;
+            } else {
+                // Different maximum speed limits for upward and downward motion:
+                double maxSpeedUp = 0.02;   // upward movement limit
+                double maxSpeedDown = 0.18; // downward movement limit
+                if (manualInput > 0) {
+                    manualInput = Math.min(manualInput, maxSpeedUp);
+                } else if (manualInput < 0) {
+                    manualInput = Math.max(manualInput, -maxSpeedDown);
+                }
+                // Apply slew rate limiting.
+                manualInput = slewLimiter.calculate(manualInput);
             }
-            // Limit maximum speed to 0.5:
-            double maxSpeed = 0.5;
-            manualInput = MathUtil.clamp(manualInput, -maxSpeed, maxSpeed);
-    
-            if (Math.abs(manualInput) > DEADBAND) {
+            
+            if (Math.abs(manualInput) > 0.0) {
+                // Manual control in effect: update holdTarget.
+                holdTarget = encoder.getPosition();
                 presetActive = false;
                 leader.set(manualInput);
             } else if (presetActive) {
+                // Preset mode: command the target.
                 closedLoopController.setReference(targetPosition, ControlType.kPosition, ClosedLoopSlot.kSlot0, 0.0);
             } else {
-                leader.set(0.0);
+                // No manual input, no preset: hold position.
+                // If holdTarget is NaN (first time), capture current position.
+                if (Double.isNaN(holdTarget)) {
+                    //holdTarget = encoder.getPosition();
+                }
+                closedLoopController.setReference(holdTarget, ControlType.kPosition, ClosedLoopSlot.kSlot0, 0.0);
             }
         }, this));
         
@@ -113,7 +127,9 @@ public class Elevator extends SubsystemBase {
     public void goToPosition(double position) {
         targetPosition = position;
         presetActive = true;
-        SmartDashboard.putNumber("Elevator Preset Target", position);  // Debug output
+        // Reset holdTarget so that hold mode will start from the new target if manual input ceases.
+        holdTarget = Double.NaN;
+        SmartDashboard.putNumber("Elevator Preset Target", position);
         closedLoopController.setReference(position, ControlType.kPosition, ClosedLoopSlot.kSlot0, 0.0);
     }
     
@@ -122,7 +138,7 @@ public class Elevator extends SubsystemBase {
     public void goToLow()    { goToPosition(POSITION_LOW); }
     public void goToMid()    { goToPosition(POSITION_MID); }
     public void goToHigh()   { goToPosition(POSITION_HIGH); }
-    
+  
     /**
      * Provides manual open-loop control of the elevator.
      * @param speed Motor output (-1.0 to 1.0).
