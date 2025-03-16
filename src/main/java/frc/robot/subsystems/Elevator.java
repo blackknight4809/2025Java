@@ -2,154 +2,168 @@ package frc.robot.subsystems;
 
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
-// import com.revrobotics.spark.config.SparkMaxConfig;  // Config code commented out
+import com.revrobotics.RelativeEncoder;
 import com.revrobotics.spark.SparkClosedLoopController;
 import com.revrobotics.spark.ClosedLoopSlot;
 import com.revrobotics.spark.SparkBase.ControlType;
-import com.revrobotics.spark.SparkBase.PersistMode;
-import com.revrobotics.spark.SparkBase.ResetMode;
-import com.revrobotics.RelativeEncoder;
-
+import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.wpilibj.Joystick;
-import edu.wpi.first.wpilibj2.command.RunCommand;
-import edu.wpi.first.wpilibj2.command.InstantCommand;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.InstantCommand;
+import edu.wpi.first.wpilibj2.command.RunCommand;
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
 public class Elevator extends SubsystemBase {
-    // Leader and follower SparkMax controllers.
-    private final SparkMax leader;
-    private final SparkMax follower;
-    
-    // Closed-loop controller and encoder from the leader.
-    private final SparkClosedLoopController closedLoopController;
+
+    // Motor controllers.
+    private final SparkMax primaryMotor;
+    private final SparkMax followerMotor;
+
+    // Encoder and Spark Max built-in PID controller.
     private final RelativeEncoder encoder;
-    
-    // Joystick (port 1) used for manual control.
+    private final SparkClosedLoopController pidController;
+
+    // Bottom limit switch (wired to DIO2; normally open so that when pressed, bottomLimit.get() returns true).
+    private final DigitalInput bottomLimitSwitch;
+
+    // Joystick (port 1) for manual control.
     private final Joystick joystick;
-    
+
     // Slew rate limiter for smoothing manual input.
-    private final SlewRateLimiter slewLimiter;
-    
-    // Preset positions (encoder units). Negative values: 0 is bottom, -14 is top.
-    private static final double POSITION_BOTTOM = 0.0;
-    private static final double POSITION_LOW    = -2.0;
-    private static final double POSITION_MID    = -10.0;
-    private static final double POSITION_HIGH   = -14.0;
-    
-    // Deadband for manual control.
-    private static final double DEADBAND = 0.2;
-    
-    // Flag and target for preset control.
+    private final SlewRateLimiter slewLimiter = new SlewRateLimiter(0.5);
+
+    // Control state.
+    private boolean isHomed = false;
+    private double setpoint; // Target position in inches.
     private boolean presetActive = false;
-    private double targetPosition = 0.0;
-    
-    // Hold target: when no manual input, we'll hold this position.
-    private double holdTarget = Double.NaN;
-    
-    /**
-     * Constructs the Elevator subsystem.
-     * @param joystick The Joystick on port 1 used for manual control.
-     */
+
+    // Deadband threshold for manual control.
+    private static final double DEADBAND = 0.1;
+
     public Elevator(Joystick joystick) {
         this.joystick = joystick;
-        
-        // Instantiate slew rate limiter (adjust rate as needed).
-        slewLimiter = new SlewRateLimiter(0.5);
-        
-        // Instantiate leader and follower using CAN IDs from Constants.
-        leader = new SparkMax(Constants.Elevator.liftLeft, MotorType.kBrushless);
-        follower = new SparkMax(Constants.Elevator.liftRight, MotorType.kBrushless);
-        
-        // Manually set leader inversion.
-        leader.setInverted(false);
-        
-        // Retrieve the closed-loop controller and encoder from the leader.
-        closedLoopController = leader.getClosedLoopController();
-        encoder = leader.getEncoder();
-        
-        // Manually set follower inversion.
-        follower.setInverted(true);
-        // Optionally: follower.follow(leader);
-        
-        // Set the default command:
-        // If manual input exists, override preset and update holdTarget.
-        // If no manual input and no preset, hold the last known position.
-        // If preset is active, command the target.
+
+        // Instantiate SparkMax controllers using CAN IDs from Constants.
+        primaryMotor = new SparkMax(Constants.Elevator.liftLeft, MotorType.kBrushless);
+        followerMotor = new SparkMax(Constants.Elevator.liftRight, MotorType.kBrushless);
+
+        // Manually set inversions.
+        primaryMotor.setInverted(false);
+        followerMotor.setInverted(true);
+        // If supported, you can command the follower to follow:
+       // followerMotor.follow(primaryMotor);
+
+        // Retrieve encoder and PID controller from the primary.
+        encoder = primaryMotor.getEncoder();
+        pidController = primaryMotor.getClosedLoopController();
+
+        // Reset encoder initially.
+        encoder.setPosition(0.0);
+
+        // Instantiate bottom limit switch on DIO2.
+        bottomLimitSwitch = new DigitalInput(Constants.Elevator.limitSwitchPort);
+
+        // Initialize state.
+        isHomed = false;
+        setpoint = Constants.Elevator.bottomPos;
+        presetActive = false;
+
+        // Add SmartDashboard control to reset the encoder.
+        SmartDashboard.putData("Reset Elevator Encoder", 
+                new InstantCommand(() -> {
+                    encoder.setPosition(0);
+                }, this));
+
+        // Set the default command.
+        // When manual input (joystick Y) is active, we bypass PID and drive open-loop.
+        // When no manual input is present, we command the PID to hold the setpoint.
         setDefaultCommand(new RunCommand(() -> {
+            // First, check the limit switch. If it's pressed, home the elevator.
+            if (isLimitSwitchPressed()) {
+                handleBottomLimit();
+            }
+
+            // Read manual input from joystick Y (adjust sign as needed; here, positive means upward).
             double manualInput = joystick.getY();
+
             // Apply deadband.
-            if (Math.abs(manualInput) < DEADBAND) {
-                manualInput = 0.0;
+            manualInput = Math.abs(manualInput) < DEADBAND ? 0.0 : manualInput;
+            // Optionally, apply slew rate limiting for smoother control.
+            manualInput = slewLimiter.calculate(manualInput);
+
+            if (Math.abs(manualInput) > 0.0) {
+                // Manual control: override preset.
+                presetActive = false;
+                primaryMotor.set(manualInput);
+            } else if (presetActive && isHomed) {
+                // Preset mode: command the setpoint using built-in PID, with gravity compensation (kG).
+                pidController.setReference(inchesToEncoderCounts(setpoint), ControlType.kPosition, ClosedLoopSlot.kSlot0, Constants.Elevator.kG);
+            } else if (isHomed) {
+                // If there's no manual input and no preset, hold the current position.
+                double holdPosition = encoder.getPosition();
+                pidController.setReference(holdPosition, ControlType.kPosition, ClosedLoopSlot.kSlot0, Constants.Elevator.kG);
             } else {
-                // Different maximum speed limits for upward and downward motion:
-                double maxSpeedUp = 0.02;   // upward movement limit
-                double maxSpeedDown = 0.18; // downward movement limit
-                if (manualInput > 0) {
-                    manualInput = Math.min(manualInput, maxSpeedUp);
-                } else if (manualInput < 0) {
-                    manualInput = Math.max(manualInput, -maxSpeedDown);
-                }
-                // Apply slew rate limiting.
-                manualInput = slewLimiter.calculate(manualInput);
+                // Not homed, don't drive.
+                primaryMotor.set(0.0);
             }
             
-            if (Math.abs(manualInput) > 0.0) {
-                // Manual control in effect: update holdTarget.
-                holdTarget = encoder.getPosition();
-                presetActive = false;
-                leader.set(manualInput);
-            } else if (presetActive) {
-                // Preset mode: command the target.
-                closedLoopController.setReference(targetPosition, ControlType.kPosition, ClosedLoopSlot.kSlot0, 0.0);
-            } else {
-                // No manual input, no preset: hold position.
-                // If holdTarget is NaN (first time), capture current position.
-                if (Double.isNaN(holdTarget)) {
-                    //holdTarget = encoder.getPosition();
-                }
-                closedLoopController.setReference(holdTarget, ControlType.kPosition, ClosedLoopSlot.kSlot0, 0.0);
-            }
+            // Update telemetry.
+            SmartDashboard.putNumber("Elevator Height (in)", encoderCountsToInches(encoder.getPosition()));
+            SmartDashboard.putNumber("Elevator Setpoint (in)", setpoint);
+            SmartDashboard.putBoolean("Elevator Homed", isHomed);
+            SmartDashboard.putBoolean("Bottom Limit", isLimitSwitchPressed());
         }, this));
-        
-        // Add a SmartDashboard widget to reset the elevator encoder.
-        SmartDashboard.putData("Reset Elevator Encoder", 
-            new InstantCommand(() -> encoder.setPosition(0), this));
     }
-    
+
+    // Utility conversion: inches to encoder counts.
+    private double inchesToEncoderCounts(double inches) {
+        return inches * Constants.Elevator.countsPerInch;
+    }
+
+    // Utility conversion: encoder counts to inches.
+    private double encoderCountsToInches(double counts) {
+        return counts / Constants.Elevator.countsPerInch;
+    }
+
+    // Returns true if the bottom limit switch is pressed.
+    private boolean isLimitSwitchPressed() {
+        return bottomLimitSwitch.get(); // Wired normally open: returns true when pressed.
+    }
+
+    // Homing routine: when bottom limit is pressed, reset encoder and mark elevator as homed.
+    private void handleBottomLimit() {
+        encoder.setPosition(Constants.Elevator.bottomPos * Constants.Elevator.countsPerInch);
+        isHomed = true;
+        setpoint = Constants.Elevator.bottomPos;
+    }
+
     /**
-     * Sets the elevator target position and enables preset mode.
-     * @param position The desired encoder setpoint.
+     * Sets the elevator target position in inches and activates preset mode.
+     * @param inches Target position in inches.
      */
-    public void goToPosition(double position) {
-        targetPosition = position;
+    public void setPositionInches(double inches) {
+        if (!isHomed && inches > Constants.Elevator.bottomPos) {
+            SmartDashboard.putString("Elevator Warning", "Elevator not homed!");
+            return;
+        }
+        setpoint = MathUtil.clamp(inches, Constants.Elevator.bottomPos, Constants.Elevator.maxPos);
         presetActive = true;
-        // Reset holdTarget so that hold mode will start from the new target if manual input ceases.
-        holdTarget = Double.NaN;
-        SmartDashboard.putNumber("Elevator Preset Target", position);
-        closedLoopController.setReference(position, ControlType.kPosition, ClosedLoopSlot.kSlot0, 0.0);
+        pidController.setReference(inchesToEncoderCounts(setpoint), ControlType.kPosition, ClosedLoopSlot.kSlot0, Constants.Elevator.kG);
+        SmartDashboard.putNumber("Elevator Preset Target (in)", setpoint);
     }
-    
-    // Convenience methods for preset positions.
-    public void goToBottom() { goToPosition(POSITION_BOTTOM); }
-    public void goToLow()    { goToPosition(POSITION_LOW); }
-    public void goToMid()    { goToPosition(POSITION_MID); }
-    public void goToHigh()   { goToPosition(POSITION_HIGH); }
-  
+
     /**
-     * Provides manual open-loop control of the elevator.
-     * @param speed Motor output (-1.0 to 1.0).
+     * Returns the current elevator height in inches.
      */
-    public void manualControl(double speed) {
-        leader.set(speed);
+    public double getHeightInches() {
+        return encoderCountsToInches(encoder.getPosition());
     }
     
     @Override
     public void periodic() {
-        SmartDashboard.putNumber("Elevator Encoder", encoder.getPosition());
-        SmartDashboard.putNumber("Elevator Motor Output", leader.getAppliedOutput());
+        // Periodic telemetry is handled in the default command; additional periodic tasks can be added here if needed.
     }
 }

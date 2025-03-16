@@ -19,17 +19,16 @@ public class RobotContainer {
   private final AlgeaRemover algeaRemover;
 
   // Controllers:
-  // Operator joystick on port 1 will control Elevator and Dispenser.
+  // Operator joystick on port 1 will control Dispenser.
   private final Joystick operatorJoystick = new Joystick(1);
   // Xbox controller on port 0 is used for driving and AlgeaRemover.
   private final XboxController driveController = new XboxController(Constants.OperatorConstants.kDriverControllerPort);
 
   public RobotContainer() {
     // Instantiate subsystems.
-    // Elevator and Dispenser now use the operator joystick (port 1) for manual control.
-    elevator = new Elevator(operatorJoystick);
+    // Use the new Elevator code that handles homing and motion profiling.
+    elevator = new Elevator(operatorJoystick); // new elevator code with homing, etc.
     dispenser = new Dispenser(operatorJoystick);
-    // AlgeaRemover uses the Xbox controller (port 0).
     algeaRemover = new AlgeaRemover(driveController);
     
     // Configure all button bindings.
@@ -44,10 +43,11 @@ public class RobotContainer {
     JoystickButton elevatorMidButton    = new JoystickButton(operatorJoystick, 8);
     JoystickButton elevatorHighButton   = new JoystickButton(operatorJoystick, 11);
     
-    elevatorBottomButton.onTrue(new InstantCommand(() -> elevator.goToBottom(), elevator));
-    elevatorLowButton.onTrue(new InstantCommand(() -> elevator.goToLow(), elevator));
-    elevatorMidButton.onTrue(new InstantCommand(() -> elevator.goToMid(), elevator));
-    elevatorHighButton.onTrue(new InstantCommand(() -> elevator.goToHigh(), elevator));
+    // Use setPositionInches() with constants from Constants.ElevatorConstants.
+    elevatorBottomButton.onTrue(new InstantCommand(() -> elevator.setPositionInches(Constants.Elevator.bottomPos), elevator));
+    elevatorLowButton.onTrue(new InstantCommand(() -> elevator.setPositionInches(Constants.Elevator.L1), elevator));
+    elevatorMidButton.onTrue(new InstantCommand(() -> elevator.setPositionInches(Constants.Elevator.L2), elevator));
+    elevatorHighButton.onTrue(new InstantCommand(() -> elevator.setPositionInches(Constants.Elevator.L3.position), elevator));
     
     // --- Dispenser Preset Bindings ---
     // Bound to the operator joystick.
@@ -83,7 +83,8 @@ public class RobotContainer {
     return null;
   }
 
+  // Optional getter for operator joystick.
   public Joystick getOperatorJoystick() {
     return operatorJoystick;
-}
+  }
 }
